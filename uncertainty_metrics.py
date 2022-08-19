@@ -1,18 +1,14 @@
 import torch
-
-from models import *
-from train_utils import *
+import copy
+from scipy.special import rel_entr
 
 def loo_pipeline(model, dataset, data, train_mask,
                  test_mask, which_node,
-                 n_epochs,
-                 criterion, optimizer,
+                 n_epochs=200,
                  original_output=None,
-                 indicate=False, \
-                 return_prediction=False,
                  compute_y_differences=False,
-                 task=task,
-                 loss_function=torch.nn.functional.cross_entropy(),
+                 task='classfication',
+                 loss_function=torch.nn.CrossEntropyLoss(),
                  lr=0.001):
     """
     model should be the trained model/
@@ -30,35 +26,33 @@ def loo_pipeline(model, dataset, data, train_mask,
         original_output  = model(data.x, data.edge_index)
     _, original_predictions = torch.max(original_output.detach(),1)
     length = len(data.y[train_mask])
-    original_accuracy = (original_predictions[train_mask] == data.y[train_mask].detach()).sum().item()/length
-    original_misclassified = (original_predictions[train_mask] != data.y[train_mask]).numpy()
+    original_accuracy = (original_predictions[test_mask] == data.y[test_mask].detach()).sum().item()/length
+    original_misclassified = (original_predictions[test_mask] != data.y[test_mask]).numpy()
 
     #### Mask a node, and retrain on the data for each node
     new_model = copy.deepcopy(model)
+    optimizer = torch.optim.Adam(new_model.parameters(), lr=lr, weight_decay=5e-4)
     new_mask = copy.deepcopy(train_mask)
     new_mask[which_node] = False
-    train_acc_list, test_acc_list, _, _, new_predictions = train(n_epochs, new_model,
-                                                       criterion=loss_function,
-                                                       optimizer=torch.optim.Adam(new_model.parameters(), lr=lr),
-                                                       data.x, data.y, data.edge_index,
-                                                       m = mask(new_mask, test_mask),
-                                                       plotting = False,
-                                                       task=task)
+    train_acc_list, test_acc_list, loss_list, misclassified, predictions = train(n_epochs, new_model, loss_function, optimizer,
+                                                     x= data.x, edge_index= data.edge_index, y=data.y,
+                                                     m=mask(new_mask, test_mask),
+                                                     scatter_size=30, plotting=False)
     loo_output  = new_model(data.x, data.edge_index)
     _, loo_predictions = torch.max(loo_output.detach(),1)
     length = len(data.y[test_mask])
     loo_accuracy = (loo_predictions[test_mask] == data.y[test_mask].detach()).sum().item()/length
-    loo_misclassified = (loo_predictions[test_mask] != data.y[train_mask]).numpy()
+    loo_misclassified = (loo_predictions[test_mask] != data.y[test_mask]).numpy()
     if compute_y_differences:
         if len(loo_output) != len(original_output):
             y_differences = None
             print(HERE)
         else:
-            original_scores = torch.nn.functional.softmax(original_output, dim=0).numpy()
-            loo_scores = torch.nn.functional.softmax(loo_output, dim=0).numpy()
-            kl = sum(rel_entr(original_scores, loo_scores))
+            original_scores = torch.nn.functional.softmax(original_output, dim=0).detach().numpy()
+            loo_scores = torch.nn.functional.softmax(loo_output, dim=0).detach().numpy()
+            kl = np.mean(rel_entr(original_scores, loo_scores),1)
             #print(f"kl divergence: {kl}")
-            y_differences = F.mse_loss(loo_scores, original_scores)
+            y_differences = np.mean(np.linalg.norm(loo_scores - original_scores))
             # softmax(original_output) - softmax(new_output) -> difference of the score
         # compare two differences / nonnegative version
         # KL divergence, take MSE loss
@@ -76,15 +70,14 @@ def loo_pipeline(model, dataset, data, train_mask,
 
 def check_pipeline(model, dataset, data, train_mask,
                    test_mask,
-                   n_epochs,
-                   criterion, optimizer,
+                   n_epochs=200,
                    original_output=None,
                    indicate=False, \
                    return_prediction=False,
                    compute_y_differences=False,
                    dimension=32,
-                   task=task,
-                   loss_function=torch.nn.functional.cross_entropy(),
+                   task='classification',
+                   loss_function=torch.nn.CrossEntropyLoss(),
                    lr=0.001):
     """
     model should be the trained model/
@@ -102,22 +95,20 @@ def check_pipeline(model, dataset, data, train_mask,
         original_output  = model(data.x, data.edge_index)
     _, original_predictions = torch.max(original_output.detach(),1)
     length = len(data.y[train_mask])
-    original_accuracy = (original_predictions[train_mask] == data.y[train_mask].detach()).sum().item()/length
-    original_misclassified = (original_predictions[train_mask] != data.y[train_mask]).numpy()
+    original_accuracy = (original_predictions[test_mask] == data.y[test_mask].detach()).sum().item()/length
+    original_misclassified = (original_predictions[test_mask] != data.y[test_mask]).numpy()
     y_differences = []
     kl = []
     #### Mask a node, and retrain on the data for each node
-    for i in np.which(train_mask)[0]:
-        loo_output, y_prime, kl_prime, loo_accuracy_prime = loo_pipeline(model, dataset,
-                                                                   data, train_mask,
-                                                                   test_mask, which_node,
-                                                                   n_epochs,
-                                                                   criterion, optimizer,
-                                                                   original_output=None,
-                                                                   compute_y_differences=compute_y_difference,
-                                                                   task=task,
-                                                                   loss_function=loss_function,
-                                                                   lr=lr)
+    for i in torch.where(data.train_mask)[0]:
+        loo_output, y_prime, kl_prime, loo_accuracy_prime = loo_pipeline(model, dataset, data, train_mask,
+                 test_mask, which_node=i,
+                 n_epochs=n_epochs,
+                 original_output=original_output,
+                 compute_y_differences=compute_y_differences,
+                 task=task,
+                 loss_function=loss_function,
+                 lr=lr)
         y_differences += [y_prime]
         kl += [kl_prime]
 
