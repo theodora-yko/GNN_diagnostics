@@ -45,7 +45,7 @@ def gcn_norm(edge_index, edge_weight=None, num_nodes=None, alpha=0.5, beta=1.,
         assert flow in ["source_to_target"]
         adj_t = edge_index
         if not adj_t.has_value():
-            adj_t = adj_t.fill_value(1., dtype=dtype)
+            adj_t = adj_t.fill_value(fill_value, dtype=dtype)
         if add_self_loops:
             adj_t = fill_diag(adj_t, fill_value)
         deg = sparsesum(adj_t, dim=1)
