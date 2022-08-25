@@ -1,0 +1,70 @@
+# file specific libraries
+import torch
+from IPython.core.interactiveshell import InteractiveShell
+InteractiveShell.ast_node_interactivity = "all"
+import math, random, torch, collections, time, torch.nn.functional as F, networkx as nx, matplotlib.pyplot as plt, numpy as np
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn import Linear
+from torch_geometric.nn import GCNConv
+from IPython.display import clear_output
+from torch_geometric.utils import to_networkx
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
+from functools import wraps
+
+import sys,os
+from models import *
+from train_utils import *
+from uncertainty_metrics import *
+
+from torch_geometric.datasets import Planetoid
+from torch_geometric.transforms import NormalizeFeatures
+import torch
+import torch_geometric as tg
+import pandas as pd
+
+dataset_name = 'Cora'
+dataset = Planetoid(root='../data/Planetoid', name=dataset_name, transform=NormalizeFeatures())
+data = dataset[0]  # Get the first graph object.
+
+### print dataset & data info
+dataset_print(dataset)
+data_print(data)
+
+#### Simple model
+
+model =GNN(input_dim = data.num_features, hidden_dim=252,
+           output_dim = dataset.num_classes, n_layers=2,
+           activation ='relu', slope=.1,
+           device ='cpu',
+           alpha_res =0., alpha=0.5,
+           beta=1.,
+           normalize=False)
+criterion = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=5e-4) #didn't include weight decay
+train_acc_list, test_acc_list, loss_list, misclassified, predictions = train(500, model, criterion, optimizer,
+                                                 x= data.x, edge_index= data.edge_index, y=data.y,
+                                                m=mask(data.train_mask, data.test_mask),
+                                                scatter_size=30, plotting=False)
+
+# loo_pipeline(model, dataset, data,data.train_mask,
+#                  data.test_mask, 1,
+#                  10,
+#                  original_output=None,
+#                  compute_y_differences=True,
+#                  task='classfication',
+#                  loss_function=torch.nn.CrossEntropyLoss(),
+#                  lr=0.001)
+
+check_pipeline(model, dataset, data, data.train_mask,
+                   data.test_mask,
+                   n_epochs=200,
+                   original_output=None,
+                   indicate=True, \
+                   return_prediction=True,
+                   compute_y_differences=True,
+                   dimension=32,
+                   task='classification',
+                   loss_function=torch.nn.CrossEntropyLoss(),
+                   lr=0.001)
