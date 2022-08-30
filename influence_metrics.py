@@ -5,13 +5,13 @@ from uncertainty_metrics import *
 import networkx as nx, torch_geometric.utils as F
 
 
-def diff_epoch_pipelines(model, dataset, data, epoch_sizes=[10, 50, 100], find_common_nodes=True, display=True,
-                         indicate=True):
+def repeat_pipelines(model, dataset, data, epoch_size=100, repeat_loo = 3, find_common_nodes=True, indicate=True):
     """
     arguments:
-        - dataset
+        - dataset: must be already trained in order to call check_pipeline
         - data
-        - epoch sizes: an array of different epoch sizes
+        - epoch_size: 
+        - repeat_loo:
         - indicate: if TRUE, indicates whenever an influential node is found
     returns: 
         - result: a dictionary of list of influential nodes & output, accuracy level at each epoch level
@@ -19,11 +19,11 @@ def diff_epoch_pipelines(model, dataset, data, epoch_sizes=[10, 50, 100], find_c
     """
     result = {}
 
-    for size in epoch_sizes:
-        print(f"---- Current test size: {size} ----")
+    for test_num in range(1, repeat_loo+1):
+        print(f"---- test number {test_num} ----")
         new_outputs, _, _, new_accuracies = check_pipeline(model, dataset, data, data.train_mask,
                                                            data.test_mask,
-                                                           n_epochs=size,
+                                                           n_epochs=epoch_size,
                                                            original_output=None,
                                                            indicate=False, \
                                                            return_prediction=True,
@@ -38,37 +38,42 @@ def diff_epoch_pipelines(model, dataset, data, epoch_sizes=[10, 50, 100], find_c
             output_per_node[node.item()] = output
         for node, accuracy in new_accuracies.items():
             influential_nodes[node.item()] = accuracy
-        result[size] = {'influential_nodes': influential_nodes, 'output': output_per_node}
-
+        result[test_num] = {'influential_nodes': influential_nodes, 'output': output_per_node}
+        num_nodes = len(result[test_num])
+        
         if indicate:
-            print(f"Influential nodes found for epoch size {size}: {result[size]['influential_nodes']}")
+            print(f"Influential nodes found for test number {test_num}: {result[test_num]['influential_nodes']}")
 
-    node_list = []
-    return result, node_list
+    return result
 
-def find_common_nodes(result, node_list): 
+def find_common_nodes(result): 
     first_key = list(result.keys())[0]
+    node_list = []
     node_list += list(result[first_key]['influential_nodes'].keys())
     node_list = set(node_list)
-    for size in result.keys():
-        node_list = node_list.intersection(result[size]['influential_nodes'])
+    for test_num in result.keys():
+        node_list = node_list.intersection(result[test_num]['influential_nodes'])
 
     if len(node_list) != 0:
         print()
         print('=================================')
         print(f"common nodes: {node_list}")
+        return node_list
+  
     else:
         print()
         print('=================================')
         print("no common influential nodes found")
+        return None 
+    
 
-def display_influential_nodes(result): 
-    epoch_levels = list(result.keys())
-    for epoch_level in epoch_levels: 
-        num_nodes = len(result[epoch_level]['influential_nodes'])
-        print(f"For epoch size of {epoch_level}, {num_nodes} influential nodes found")
-        print(f"  - influential nodes: {list(result[epoch_level]['influential_nodes'].keys())}")
-        print(f"  - final accuracy: {list(result[epoch_level]['influential_nodes'].values())[-1]}")
+# def display_influential_nodes(result): 
+#     epoch_levels = list(result.keys())
+#     for epoch_level in epoch_levels: 
+#         num_nodes = len(result[epoch_level]['influential_nodes'])
+#         print(f"For epoch size of {epoch_level}, {num_nodes} influential nodes found")
+#         print(f"  - influential nodes: {list(result[epoch_level]['influential_nodes'].keys())}")
+#         print(f"  - final accuracy: {list(result[epoch_level]['influential_nodes'].values())[-1]}")
 
 def compute_centrality(dataset, influential_nodes, task='degree_centrality'):
     """
@@ -83,14 +88,15 @@ def compute_centrality(dataset, influential_nodes, task='degree_centrality'):
         dictionary = nx.degree_centrality(G=graph)
     elif task == 'betweenness_centrality':
         dictionary = nx.betweenness_centrality(G=graph)  # calculate betweenness, returns a dictionary
-
+    
+    # if the nodes in the training set chosen based on some sort of centrality? 
+    # try to plot all the influences in the node 
     result = {}
     for i in influential_nodes:
         result[i] = dictionary[i]
 
     print(f"search result: \n{result}")
     return result
-
 
 def node_similarity(dataset, influential_nodes):
     """
@@ -100,9 +106,10 @@ def node_similarity(dataset, influential_nodes):
     returns: a dictionary of node centralities of given influential nodes
     """
     graph = F.to_networkx(dataset[0])  # process the graph to networkX type
-    sim = nx.simrank_similarity(G)
+    sim = nx.simrank_similarity(graph)
     similarities_map = np.array([[sim[u][v] for v in influential_nodes] for u in influential_nodes])
-    print(similarities_map)
+    similarities_PD = pd.DataFrame(data = similarities_map)
+    print(similarities_PD)
     return similarities_map
 
 def find_common_neighbours(dataset, influential_nodes): 
