@@ -12,7 +12,10 @@ def diff_epoch_pipelines(model, dataset, data, epoch_sizes=[10, 50, 100], find_c
         - dataset
         - data
         - epoch sizes: an array of different epoch sizes
-    returns: a dictionary of list of influential nodes & output, accuracy level at each epoch level
+        - indicate: if TRUE, indicates whenever an influential node is found
+    returns: 
+        - result: a dictionary of list of influential nodes & output, accuracy level at each epoch level
+        - node: a list of influential nodes that appeared in all loo_pipelines 
     """
     result = {}
 
@@ -37,28 +40,35 @@ def diff_epoch_pipelines(model, dataset, data, epoch_sizes=[10, 50, 100], find_c
             influential_nodes[node.item()] = accuracy
         result[size] = {'influential_nodes': influential_nodes, 'output': output_per_node}
 
-    if indicate:
-        for size, item in result.items():
-            print(f"Influential nodes found: {result[size]['influential_nodes']}")
+        if indicate:
+            print(f"Influential nodes found for epoch size {size}: {result[size]['influential_nodes']}")
 
     node_list = []
-    if find_common_nodes:
-        node_list += list(result[1]['influential_nodes'].keys())
-        node_list = set(node_list)
-        for size in result.keys():
-            node_list = node_list.intersection(result[size]['influential_nodes'])
-
-        if len(node_list) != 0:
-            print()
-            print('=================================')
-            print(f"common nodes: {node_list}")
-        else:
-            print()
-            print('=================================')
-            print("no common influential nodes found")
-
     return result, node_list
 
+def find_common_nodes(result, node_list): 
+    first_key = list(result.keys())[0]
+    node_list += list(result[first_key]['influential_nodes'].keys())
+    node_list = set(node_list)
+    for size in result.keys():
+        node_list = node_list.intersection(result[size]['influential_nodes'])
+
+    if len(node_list) != 0:
+        print()
+        print('=================================')
+        print(f"common nodes: {node_list}")
+    else:
+        print()
+        print('=================================')
+        print("no common influential nodes found")
+
+def display_influential_nodes(result): 
+    epoch_levels = list(result.keys())
+    for epoch_level in epoch_levels: 
+        num_nodes = len(result[epoch_level]['influential_nodes'])
+        print(f"For epoch size of {epoch_level}, {num_nodes} influential nodes found")
+        print(f"  - influential nodes: {list(result[epoch_level]['influential_nodes'].keys())}")
+        print(f"  - final accuracy: {list(result[epoch_level]['influential_nodes'].values())[-1]}")
 
 def compute_centrality(dataset, influential_nodes, task='degree_centrality'):
     """
@@ -94,6 +104,10 @@ def node_similarity(dataset, influential_nodes):
     similarities_map = np.array([[sim[u][v] for v in influential_nodes] for u in influential_nodes])
     print(similarities_map)
     return similarities_map
+
+def find_common_neighbours(dataset, influential_nodes): 
+    graph = pygUtil.to_networkx(dataset[0])
+    nx.k_nearest_neighbors(G=graph, source='in+out', target='in+out', nodes=None, weight=None)
 
 
 def accessibility(dataset, influential_nodes):
